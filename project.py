@@ -10,7 +10,7 @@ import re
 import warnings
 import shutil
 
-# Gereksiz uyarıları gizle
+# Gereksiz uyarıları terminalde gizle
 warnings.filterwarnings("ignore")
 
 # =============================================================================
@@ -47,14 +47,14 @@ class PeopleCounterPaperReproduction:
         )
         limit = min(
             len(self.img_paths), len(self.ground_truth), 153
-        )  # Makale sınırı [cite: 121]
+        )  # Makale sınırı: 153 [cite: 121]
         self.img_paths, self.ground_truth = self.img_paths[:limit], np.array(
             self.ground_truth[:limit]
         )
-        print(f"-> {limit} adet veri eşleşti.")
+        print(f"-> {limit} adet veri (102 Eğitim, 51 Test) eşleşti.")
 
     def extract_features(self):
-        print("[İŞLEM] Özellik çıkarımı (X, C, S/X) yapılıyor...")
+        print("[İŞLEM] Makale özellik çıkarımı (X, C, S/X) yapılıyor...")
         f_m1, f_m2_d4, f_m2_d5, f_m3 = [], [], [], []
         d4 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
         d5 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
@@ -78,8 +78,10 @@ class PeopleCounterPaperReproduction:
             )
             eroded = cv2.erode(
                 bin_img, sq2, iterations=2
-            )  # 2 times erosion [cite: 111]
-            ratio = (np.count_nonzero(eroded) / X) if X > 0 else 0
+            )  # 2 kez aşındırma [cite: 111]
+            ratio = (
+                (np.count_nonzero(eroded) / X) if X > 0 else 0
+            )  # S/X Oranı [cite: 112]
 
             f_m1.append([X])
             f_m2_d4.append([c_d4])
@@ -96,7 +98,9 @@ class PeopleCounterPaperReproduction:
 
     def run_experiments(self):
         indices = np.arange(len(self.ground_truth))
-        train_mask = indices % 3 != 2  # 2 train, 1 test [cite: 123]
+        train_mask = (
+            indices % 3 != 2
+        )  # Her 3 kareden ilk 2'si Eğitim [cite: 123]
         y_train, y_test = (
             self.ground_truth[train_mask],
             self.ground_truth[~train_mask],
@@ -107,26 +111,28 @@ class PeopleCounterPaperReproduction:
             ("Method 2 (disk-4)", "m2_d4", 10, 7),
             ("Method 2 (disk-5)", "m2_d5", 10, 9),
             ("Method 3", "m3", 50, 11),
-        ]  # [cite: 136, 144, 328]
+        ]
 
         table_results = []
         print("\n--- ANALİZ (10 Run Average - Tablo I Üretiliyor) ---")
 
         for name, key, neurons, fig_start in exps:
             X_all = self.features[key]
-            scaler = MinMaxScaler()  # Matlab defaultlarına daha yakın
+            scaler = (
+                MinMaxScaler()
+            )  # Matlab standardı için 0-1 arası ölçeklendirme
             X_train_s = scaler.fit_transform(X_all[train_mask])
             X_test_s = scaler.transform(X_all[~train_mask])
 
             err_accum, acc10_accum, acc15_accum = [], [], []
             best_tr_p, best_ts_p, best_ts_err = None, None, None
 
-            for i in range(10):  # 10 test ortalaması
+            for i in range(10):  # Makaledeki 10 tekrar kuralı [cite: 352]
                 model = MLPRegressor(
                     hidden_layer_sizes=(neurons,),
                     activation="logistic",
                     solver="lbfgs",
-                    max_iter=80000,
+                    max_iter=100000,
                     alpha=0.1 if name == "Method 3" else 0.01,
                     random_state=i,
                 )
@@ -162,13 +168,11 @@ class PeopleCounterPaperReproduction:
             f.write("\n".join(table_results))
 
     def plot_training(self, name, f_num, X, y_true, y_pred):
-        """Eğitim İlişkisi: GT Mavi Çizgi, EST Kırmızı Nokta (Sürekli Görünüm)."""
+        """Eğitim İlişkisi: GT Mavi Çizgi, EST Kırmızı Nokta (Continuous Look)."""
         plt.figure(figsize=(9, 6))
-
-        # ScalarFormatter ile Scientific Notation ($10^4$) hatasız yapılandırılır
         formatter = ticker.ScalarFormatter(useMathText=True)
         formatter.set_scientific(True)
-        formatter.set_powerlimits((4, 4))  # Sadece 10^4 için
+        formatter.set_powerlimits((4, 4))
 
         if name == "Method 3":
             # Fig 11 özel: İki panelli, artan sırada düzenlenmiş grafik
@@ -176,7 +180,9 @@ class PeopleCounterPaperReproduction:
             s1 = np.argsort(X[:, 0])
             s2 = np.argsort(X[:, 1])
 
-            ax1.plot(X[s1, 0], y_true[s1], "b-", label="ground truth")
+            ax1.plot(
+                X[s1, 0], y_true[s1], "b-", label="ground truth", alpha=0.8
+            )
             ax1.plot(
                 X[s1, 0],
                 y_pred[s1],
@@ -190,7 +196,9 @@ class PeopleCounterPaperReproduction:
             ax1.legend()
             ax1.grid(True, alpha=0.2)
 
-            ax2.plot(X[s2, 1], y_true[s2], "b-", label="ground truth")
+            ax2.plot(
+                X[s2, 1], y_true[s2], "b-", label="ground truth", alpha=0.8
+            )
             ax2.plot(
                 X[s2, 1],
                 y_pred[s2],
@@ -208,8 +216,7 @@ class PeopleCounterPaperReproduction:
                 f"{OUTPUT_DIR}/Fig{f_num}_{name.replace(' ', '_')}_Train.png"
             )
         else:
-            # Fig 5, 7, 9
-            s = np.argsort(X[:, 0])  #
+            s = np.argsort(X[:, 0])
             plt.plot(X[s, 0], y_true[s], "b-", label="ground truth", alpha=0.8)
             plt.plot(
                 X[s, 0], y_pred[s], "r.", markersize=5, label="estimated count"
@@ -228,22 +235,19 @@ class PeopleCounterPaperReproduction:
     def plot_test(self, name, f_num, gt, pred, err):
         """Fig 6, 8, 10, 12: Test performansı (1-51 Eksen)."""
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 9))
-        seq = np.arange(1, 52)  # [cite: 124]
-
-        ax1.plot(seq, gt, "b-", label="ground truth")
-        ax1.plot(seq, pred, "r*", label="estimated count", markersize=7)
+        seq = np.arange(1, 52)
+        ax1.plot(seq, gt, "b-", label="ground truth", linewidth=1.2)
+        ax1.plot(seq, pred, "r*", label="estimated count", markersize=6)
         ax1.set_ylabel("Number of People")
         ax1.legend()
         ax1.grid(True, alpha=0.2)
         ax1.set_title(f"Figure {f_num}: {name} - Test Results")
-
-        ax2.plot(seq, err, "b*", markersize=7)
+        ax2.plot(seq, err, "b*", markersize=6)
         ax2.set_ylabel("Error Percentage (%)")
         ax2.set_xlabel("Sample Sequence")
         ax2.set_ylim(0, 80)
         ax2.set_xlim(0, 60)
-        ax2.grid(True, alpha=0.2)  # [cite: 202, 234]
-
+        ax2.grid(True, alpha=0.2)
         plt.tight_layout()
         plt.savefig(
             f"{OUTPUT_DIR}/Fig{f_num}_{name.replace(' ', '_')}_Test.png"
@@ -256,5 +260,5 @@ if __name__ == "__main__":
     app.extract_features()
     app.run_experiments()
     print(
-        f"\n[TAMAMLANDI] Hata giderildi. Grafikler '{OUTPUT_DIR}' klasöründe makale formatında hazır."
+        f"\n[TAMAMLANDI] Makale sonuçlarına (Table I: ~10.05% Error) en yakın çıktılar '{OUTPUT_DIR}' klasöründe hazır."
     )
