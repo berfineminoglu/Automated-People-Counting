@@ -1,0 +1,26 @@
+Condition and terms to use the WhampoaScene dataset
+
+1) please acknowledge one of the following papers if you are using our database in your publications:
+
+Y.-L. Hou and G. K. H. Pang, "Automated people counting at a mass site," in IEEE International Conference on Automation and Logistics, 2008, pp. 464-469.
+
+Y.-L. Hou and G. K. H. Pang, "People Counting and Human Detection in a
+Challenging Situation," IEEE Transactions on Systems, Man and Cybernetics,
+Part A: Systems and Humans, vol. 41, pp. 24-33, 2010.
+
+
+2) please do not distribute the database to others without the 
+authorization from Dr. Grantham Pang.
+
+====================================================================
+
+Description of the dataset:
+1) The dataset was taken in a public event.During around four hours, one image was saved every 100 seconds. The filenames indicate the exact time when each image was saved. 
+
+2) The groundtruth were obtained by mannual annotation. 
+
+
+
+
+
+
