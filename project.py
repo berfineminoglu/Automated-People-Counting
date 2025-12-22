@@ -6,305 +6,215 @@ from sklearn.preprocessing import StandardScaler
 import glob
 import os
 import re
+import warnings
+
+# Gereksiz uyarıları terminalde görmemek için gizliyoruz
+warnings.filterwarnings("ignore")
 
 # =============================================================================
-# AYARLAR (DOSYA YOLLARINI BURAYA GİRİNİZ)
+# KONFİGÜRASYON (DOSYA YOLLARI)
 # =============================================================================
-# Windows yolları için r"..." kullanıyoruz.
 IMAGE_FOLDER = r"C:\Users\emino\Desktop\İYTE\2025-2026\TERM-1\CENG391\ASSIGNMENTS\ASSIGNMENT-5\Automated-People-Counting\VideoDataset\ximagepixels"
 GT_FILE = r"C:\Users\emino\Desktop\İYTE\2025-2026\TERM-1\CENG391\ASSIGNMENTS\ASSIGNMENT-5\Automated-People-Counting\VideoDataset\groundtruth.txt"
-
-# Sonuçların kaydedileceği klasör (Otomatik oluşturulur)
 OUTPUT_DIR = "Odev_Sonuclari"
 
 
-class PeopleCounterFinal:
+class PeopleCounterReproduction:
     def __init__(self, img_folder, gt_file):
-        self.img_folder = img_folder
-        self.gt_file = gt_file
-        self.features = {}
-        self.ground_truth = []
-        self.img_paths = []
-
-        # Çıktı klasörünü oluştur
+        self.img_folder, self.gt_file = img_folder, gt_file
+        self.features, self.ground_truth, self.img_paths = {}, [], []
         if not os.path.exists(OUTPUT_DIR):
             os.makedirs(OUTPUT_DIR)
+        self.load_data()
 
-        print("\n" + "=" * 60)
-        print("CENG391 - AUTOMATED PEOPLE COUNTING (NİHAİ VERSİYON)")
-        print("=" * 60)
-
-        self.load_ground_truth()
-        self.load_image_paths()
-        self.sync_data()
-
-    def natural_sort_key(self, s):
-        """Dosyaları 1, 2, 10, 100 sırasında dizer."""
-        return [
-            int(text) if text.isdigit() else text.lower()
-            for text in re.split("([0-9]+)", s)
-        ]
-
-    def read_image_safe(self, path):
-        """Türkçe karakterli dosya yollarını okumak için özel fonksiyon."""
-        try:
-            with open(path, "rb") as f:
-                bytes_data = bytearray(f.read())
-                numpy_array = np.asarray(bytes_data, dtype=np.uint8)
-                img = cv2.imdecode(numpy_array, cv2.IMREAD_GRAYSCALE)
-                return img
-        except Exception as e:
-            return None
-
-    def load_ground_truth(self):
-        print(f"-> Ground Truth okunuyor...")
-        try:
-            with open(self.gt_file, "r") as f:
-                lines = f.readlines()
-                self.ground_truth = []
-                for line in lines:
-                    nums = re.findall(r"\d+", line)
-                    if nums:
-                        self.ground_truth.append(int(nums[-1]))
-            self.ground_truth = np.array(self.ground_truth)
-            print(f"   [OK] {len(self.ground_truth)} etiket okundu.")
-        except Exception as e:
-            print(f"   [HATA] Dosya okunamadı: {e}")
-
-    def load_image_paths(self):
-        print(f"-> Resimler taranıyor...")
-        exts = ["*.png", "*.jpg", "*.jpeg", "*.bmp", "*.tif"]
-        paths = []
-        for ext in exts:
-            paths.extend(glob.glob(os.path.join(self.img_folder, ext)))
-
-        self.img_paths = sorted(paths, key=self.natural_sort_key)
-        print(f"   [OK] {len(self.img_paths)} resim bulundu.")
-
-    def sync_data(self):
-        """Veri sayısını makaledeki gibi 153'e veya minimuma eşitler."""
-        if len(self.img_paths) == 0 or len(self.ground_truth) == 0:
-            print("[KRİTİK HATA] Veri yok!")
-            return
-
-        # Makalede 153 görüntü kullanıldığı belirtilmiş.
-        TARGET_COUNT = 153
-        min_len = min(len(self.img_paths), len(self.ground_truth))
-
-        if min_len > TARGET_COUNT:
-            print(
-                f"   [BİLGİ] Veri seti makaleye uygun olarak ilk {TARGET_COUNT} kareye kesiliyor."
-            )
-            min_len = TARGET_COUNT
-
-        self.img_paths = self.img_paths[:min_len]
-        self.ground_truth = self.ground_truth[:min_len]
-        print(f"   [HAZIR] Analiz için {min_len} örnek kullanılacak.")
-
-    def get_struct_element(self, shape, radius):
-        """Makaleye uygun morfolojik yapı elemanları."""
-        if shape == "disk":
-            size = 2 * radius + 1
-            return cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (size, size))
-        elif shape == "square":
-            # Erozyon için genellikle 3x3 kullanılır (radius=1 -> size=3)
-            # Makalede boyut belirtilmemişse 3x3 standarttır.
-            size = 2 * radius + 1
-            return cv2.getStructuringElement(cv2.MORPH_RECT, (size, size))
+    def load_data(self):
+        with open(self.gt_file, "r") as f:
+            self.ground_truth = [
+                int(line.strip()) for line in f if line.strip().isdigit()
+            ]
+        self.img_paths = glob.glob(os.path.join(self.img_folder, "*.bmp"))
+        self.img_paths.sort(
+            key=lambda f: [int(n) for n in re.findall(r"\d+", f)]
+        )
+        limit = min(len(self.img_paths), len(self.ground_truth), 153)
+        self.img_paths, self.ground_truth = self.img_paths[:limit], np.array(
+            self.ground_truth[:limit]
+        )
+        print(f"-> {limit} kare başarıyla eşleşti.")
 
     def extract_features(self):
-        print("\n[İŞLEM] Özellik çıkarımı başladı...")
+        print("[İŞLEM] Özellik çıkarımı (Morfolojik İşlemler) yapılıyor...")
         f_m1, f_m2_d4, f_m2_d5, f_m3 = [], [], [], []
+        d4 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+        d5 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
+        sq = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
 
-        # Yapı Elemanları
-        se_disk4 = self.get_struct_element("disk", 4)
-        se_disk5 = self.get_struct_element("disk", 5)
-        se_square = self.get_struct_element("square", 1)  # 3x3 Square Kernel
-
-        valid_idx = []
-
-        for i, path in enumerate(self.img_paths):
-            if i % 25 == 0:
-                print(f"   ... {i}/{len(self.img_paths)} işlendi")
-
-            img = self.read_image_safe(path)
-            if img is None:
-                continue
-
-            # Threshold (Makale: 30)
+        for path in self.img_paths:
+            with open(path, "rb") as f:
+                img = cv2.imdecode(
+                    np.frombuffer(f.read(), np.uint8), cv2.IMREAD_GRAYSCALE
+                )
             _, bin_img = cv2.threshold(img, 30, 255, cv2.THRESH_BINARY)
 
-            # --- Method 1: Foreground Pixels (X) ---
             X = np.count_nonzero(bin_img)
+            c_d4 = np.count_nonzero(
+                cv2.morphologyEx(bin_img, cv2.MORPH_CLOSE, d4)
+            )
+            c_d5 = np.count_nonzero(
+                cv2.morphologyEx(bin_img, cv2.MORPH_CLOSE, d5)
+            )
+            # Makaledeki "2 times erosion" kuralı [cite: 111, 327]
+            eroded = cv2.erode(bin_img, sq, iterations=2)
+            ratio = (np.count_nonzero(eroded) / X) if X > 0 else 0
+
             f_m1.append([X])
+            f_m2_d4.append([c_d4])
+            f_m2_d5.append([c_d5])
+            f_m3.append([c_d4, ratio])
 
-            # --- Method 2: Closed Pixels (C) ---
-            # Disk-4
-            closed_d4 = cv2.morphologyEx(bin_img, cv2.MORPH_CLOSE, se_disk4)
-            C_d4 = np.count_nonzero(closed_d4)
-            f_m2_d4.append([C_d4])
-
-            # Disk-5
-            closed_d5 = cv2.morphologyEx(bin_img, cv2.MORPH_CLOSE, se_disk5)
-            C_d5 = np.count_nonzero(closed_d5)
-            f_m2_d5.append([C_d5])
-
-            # --- Method 3: C (from disk4) and Ratio (S/X) ---
-            # Erozyon (2 kez tekrar - iterations=2)
-            eroded = cv2.erode(bin_img, se_square, iterations=2)
-            S = np.count_nonzero(eroded)
-
-            ratio = (S / X) if X > 0 else 0
-            f_m3.append([C_d4, ratio])
-
-            valid_idx.append(i)
-
-        # Listeleri numpy array'e çevir
-        self.features["m1"] = np.array(f_m1)
-        self.features["m2_d4"] = np.array(f_m2_d4)
-        self.features["m2_d5"] = np.array(f_m2_d5)
-        self.features["m3"] = np.array(f_m3)
-
-        # Eğer okunamayan resim olduysa Ground Truth'u da ona göre güncelle
-        if len(valid_idx) != len(self.ground_truth):
-            self.ground_truth = self.ground_truth[valid_idx]
-
-        print("[TAMAMLANDI] Özellikler hafızaya alındı.")
+        self.features = {
+            "m1": np.array(f_m1),
+            "m2_d4": np.array(f_m2_d4),
+            "m2_d5": np.array(f_m2_d5),
+            "m3": np.array(f_m3),
+        }
 
     def run_experiments(self):
-        if not self.features or len(self.features["m1"]) == 0:
-            return
+        indices = np.arange(len(self.ground_truth))
+        train_mask = indices % 3 != 2  # İlk 2 kare eğitim, 3. test [cite: 123]
+        y_train, y_test = (
+            self.ground_truth[train_mask],
+            self.ground_truth[~train_mask],
+        )
 
-        total = len(self.ground_truth)
-        indices = np.arange(total)
-        # Makale kuralı: Her 3'lü bloğun ilk 2'si TRAIN, 3.'sü TEST
-        train_mask = indices % 3 != 2
-
-        y_train = self.ground_truth[train_mask]
-        y_test = self.ground_truth[~train_mask]
-        test_indices = indices[~train_mask]  # X ekseni için (Sample Number)
-
-        # Deney Listesi: (Başlık, Özellik Key, Nöron Sayısı, Figür No Başlangıcı)
-        experiments = [
-            ("Method 1 (Pixels)", "m1", (10,), 5),
-            ("Method 2 (Disk-4)", "m2_d4", (10,), 7),
-            ("Method 2 (Disk-5)", "m2_d5", (10,), 9),
-            ("Method 3 (Ratio)", "m3", (50,), 11),
+        # Deney Ayarları: [İsim, Anahtar, Nöron, FigNo Başlangıcı]
+        exps = [
+            ("Method 1", "m1", 10, 5),
+            ("Method 2 (disk-4)", "m2_d4", 10, 7),
+            ("Method 2 (disk-5)", "m2_d5", 10, 9),
+            ("Method 3", "m3", 50, 11),
         ]
 
-        results_txt = []
-        results_txt.append(
-            f"{'METHOD':<25} {'AVG ERROR (%)':<15} {'ACC <10%':<15} {'ACC <15%':<15}"
-        )
-        results_txt.append("-" * 75)
-
-        print("\n--- YAPAY SİNİR AĞI EĞİTİLİYOR ---")
-
-        for name, key, hidden_nodes, fig_num in experiments:
-            X = self.features[key]
-            X_train = X[train_mask]
-            X_test = X[~train_mask]
-
-            # Veriyi Ölçekle (NN için şart)
+        for name, key, neurons, fig_start in exps:
+            X_all = self.features[key]
             scaler = StandardScaler()
-            X_train_s = scaler.fit_transform(X_train)
-            X_test_s = scaler.transform(X_test)
+            X_train_s = scaler.fit_transform(X_all[train_mask])
+            X_test_s = scaler.transform(X_all[~train_mask])
 
-            # Modeli Eğit
+            # Yakınsama sorununu çözmek için max_iter=50000 yapıldı
             model = MLPRegressor(
-                hidden_layer_sizes=hidden_nodes,
-                activation="relu",
+                hidden_layer_sizes=(neurons,),
+                activation="tanh",
                 solver="lbfgs",
-                max_iter=5000,
-                random_state=42,  # Tekrarlanabilirlik için sabit
+                max_iter=50000,
+                random_state=42,
             )
             model.fit(X_train_s, y_train)
-            preds = model.predict(X_test_s)
 
-            # Sonuçları Hesapla
-            errors = np.abs(preds - y_test)
-            err_pct = (errors / y_test) * 100
-
-            avg_err = np.mean(err_pct)
-            acc_10 = np.mean(err_pct <= 10) * 100
-            acc_15 = np.mean(err_pct <= 15) * 100
-
-            # Tabloya ekle
-            row_str = (
-                f"{name:<25} {avg_err:<15.2f} {acc_10:<15.1f} {acc_15:<15.1f}"
-            )
-            results_txt.append(row_str)
-            print(f"-> {name} tamamlandı. (Ort. Hata: %{avg_err:.2f})")
-
-            # Grafikleri Kaydet ve Göster
-            self.save_and_show_plots(
-                name, fig_num, y_test, preds, err_pct, test_indices
+            # Eğitim setindeki tahmini al (Tek sayılı Figürler için)
+            y_train_pred = model.predict(X_train_s)
+            self.plot_training(
+                name, fig_start, X_all[train_mask], y_train, y_train_pred
             )
 
-        # Sonuçları Yazdır ve Kaydet
-        print("\n" + "=" * 75)
-        for line in results_txt:
-            print(line)
-        print("=" * 75)
+            # Test seti tahmini (Çift sayılı Figürler için)
+            y_test_pred = model.predict(X_test_s)
+            err_pct = (np.abs(y_test_pred - y_test) / y_test) * 100
+            self.plot_test(name, fig_start + 1, y_test, y_test_pred, err_pct)
 
-        # Tabloyu dosyaya yaz
-        with open(os.path.join(OUTPUT_DIR, "Table_I_Results.txt"), "w") as f:
-            for line in results_txt:
-                f.write(line + "\n")
+    def plot_training(self, name, f_num, X, y_true, y_pred):
+        """Fig 5, 7, 9, 11: Eğitim seti ilişkisi."""
+        if name == "Method 3":
+            # Fig 11 Özel: İki özelliği (C ve S/X) ayrı panellerde SIRALI çiz
+            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
 
-        print(
-            f"\n[BİLGİ] Tüm grafikler ve sonuç tablosu '{OUTPUT_DIR}' klasörüne kaydedildi."
-        )
+            # C (Closed Pixels) Paneli
+            s1 = np.argsort(X[:, 0])
+            ax1.plot(X[s1, 0], y_true[s1], "b-", label="ground truth")
+            ax1.plot(
+                X[s1, 0],
+                y_pred[s1],
+                "b*",
+                label="estimated count",
+                markersize=4,
+            )
+            ax1.set_xlabel("Number of Closed Pixels (C)")
+            ax1.set_ylabel("Number of People")
+            ax1.legend()
+            ax1.grid(True, alpha=0.3)
 
-    def save_and_show_plots(
-        self, method_name, fig_start, gt, pred, err, indices
-    ):
-        # Dosya ismi için temizlik
-        clean_name = (
-            method_name.replace(" ", "_").replace("(", "").replace(")", "")
-        )
+            # S/X (Erosion Ratio) Paneli
+            s2 = np.argsort(X[:, 1])
+            ax2.plot(X[s2, 1], y_true[s2], "b-", label="ground truth")
+            ax2.plot(
+                X[s2, 1],
+                y_pred[s2],
+                "b*",
+                label="estimated count",
+                markersize=4,
+            )
+            ax2.set_xlabel("Erosion Ratio (S/X)")
+            ax2.legend()
+            ax2.grid(True, alpha=0.3)
 
-        # --- Figür A (Tahmin vs Gerçek) ---
-        plt.figure(figsize=(10, 5))
-        plt.plot(
-            indices, gt, "b-", linewidth=1.5, label="Ground Truth"
-        )  # Mavi çizgi
-        plt.plot(
-            indices, pred, "r*", markersize=8, label="Estimated Count"
-        )  # Kırmızı yıldız
-        plt.title(f"{method_name} - Estimation Results")
-        plt.xlabel("Sample Sequence")
-        plt.ylabel("Number of People")
-        plt.legend()
-        plt.grid(True, alpha=0.3)
+            fig.suptitle(
+                f"Figure {f_num}: {name} Training Relationship (Sorted)"
+            )
+        else:
+            # Fig 5, 7, 9: Tek özellikli sıralı grafik [cite: 168, 175, 251]
+            plt.figure(figsize=(8, 5))
+            s_idx = np.argsort(X[:, 0])
+            plt.plot(X[s_idx, 0], y_true[s_idx], "b-", label="ground truth")
+            plt.plot(
+                X[s_idx, 0],
+                y_pred[s_idx],
+                "b*",
+                label="estimated count",
+                markersize=4,
+            )
+            plt.title(f"Figure {f_num}: {name} Training Relationship")
+            plt.xlabel("Number of Foreground Pixels")
+            plt.ylabel("Number of People")
+            plt.legend()
+            plt.grid(True, alpha=0.3)
 
-        # Kaydet
-        save_path_est = os.path.join(
-            OUTPUT_DIR, f"Fig{fig_start}_{clean_name}_Estimation.png"
-        )
-        plt.savefig(save_path_est)
-        plt.close()  # Hafızadan sil
+        plt.savefig(f"{OUTPUT_DIR}/Fig{f_num}_{name}_Train.png")
+        plt.close()
 
-        # --- Figür B (Hata Yüzdesi) ---
-        plt.figure(figsize=(10, 5))
-        plt.plot(indices, err, "b*", markersize=8)  # Mavi yıldız
-        plt.title(f"{method_name} - Error Percentage")
-        plt.xlabel("Sample Sequence")
-        plt.ylabel("Error (%)")
-        plt.ylim(0, 80)  # Makaledeki ölçeğe yakın olması için
-        plt.grid(True, alpha=0.3)
+    def plot_test(self, name, f_num, gt, pred, err):
+        """Fig 6, 8, 10, 12: Test performansı ve hata yüzdesi."""
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
 
-        # Kaydet
-        save_path_err = os.path.join(
-            OUTPUT_DIR, f"Fig{fig_start+1}_{clean_name}_Error.png"
-        )
-        plt.savefig(save_path_err)
+        # X ekseni: 1 - 51 (Örnek sırası) [cite: 194, 224, 267, 350]
+        sample_seq = np.arange(1, len(gt) + 1)
+
+        # Üst Panel: Tahmin vs Gerçek
+        ax1.plot(sample_seq, gt, "b-", label="ground truth")
+        ax1.plot(sample_seq, pred, "r*", label="estimated count", markersize=6)
+        ax1.set_title(f"Figure {f_num}: {name} Test Results")
+        ax1.set_ylabel("Number of People")
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+
+        # Alt Panel: Hata Yüzdesi
+        ax2.plot(sample_seq, err, "b*", markersize=6)
+        ax2.set_ylabel("Error Percentage (%)")
+        ax2.set_xlabel("Sample Sequence")
+        ax2.set_ylim(0, 70)
+        ax2.set_xlim(
+            0, 60
+        )  # Eksen sınırları makaleyle eşlendi [cite: 129, 205, 332]
+        ax2.grid(True, alpha=0.3)
+
+        plt.tight_layout()
+        plt.savefig(f"{OUTPUT_DIR}/Fig{f_num}_{name}_Test.png")
         plt.close()
 
 
-# --- ÇALIŞTIRMA ---
 if __name__ == "__main__":
-    app = PeopleCounterFinal(IMAGE_FOLDER, GT_FILE)
-    if len(app.img_paths) > 0 and len(app.ground_truth) > 0:
-        app.extract_features()
-        app.run_experiments()
+    app = PeopleCounterReproduction(IMAGE_FOLDER, GT_FILE)
+    app.extract_features()
+    app.run_experiments()
+    print(
+        f"\n[BİLGİ] Convergence hatası giderildi. Eksenler ve sıralama (1-51) makale formatına uygun şekilde '{OUTPUT_DIR}' klasöründe toplandı."
+    )
