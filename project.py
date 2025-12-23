@@ -123,10 +123,12 @@ class PeopleCounterPaperReproduction:
 
         # Run experiments for each method
         for name, key, neurons, fig_start in exps:
+            # Prepare data
             X_all = self.features[key]
-            scaler = (
-                MinMaxScaler()
-            )  # Scaling to 0-1 for Matlab standardization
+            # Scaling to 0-1 for Matlab standardization
+            # Neural networks perform better with scaled data (pixels>>(0,1))
+            scaler = MinMaxScaler()
+
             X_train_s = scaler.fit_transform(X_all[train_mask])
             X_test_s = scaler.transform(X_all[~train_mask])
 
@@ -134,20 +136,31 @@ class PeopleCounterPaperReproduction:
             best_tr_p, best_ts_p, best_ts_err = None, None, None
 
             # 10 runs with different seeds
+            # Because of random initialization in MLPRegressor
+            # Averaging results
             for i in range(10):
                 model = MLPRegressor(
-                    hidden_layer_sizes=(neurons,),
-                    activation="logistic",
-                    solver="lbfgs",
-                    max_iter=100000,
-                    alpha=0.1 if name == "Method 3" else 0.01,
+                    hidden_layer_sizes=(
+                        neurons,
+                    ),  # more layer means more complex relations can be learned
+                    activation=(
+                        "logistic"
+                    ),  # sigmoid: makes outputs between 0-1, when pixels are doubled number of people not doubled so this makes these kind of complex relations better to learn
+                    solver=(
+                        "lbfgs"
+                    ),  # an algorithm to make error near 0, lbfgs is better for smaller datasets
+                    max_iter=100000,  # work until convergence
+                    alpha=(
+                        0.1 if name == "Method 3" else 0.01
+                    ),  # bigger alpha means more regularization, dont memorize data; learn and generalize better
                     random_state=i,
                 )
+                # Train and predict
                 model.fit(X_train_s, y_train)
                 tr_preds, ts_preds = model.predict(X_train_s), model.predict(
                     X_test_s
                 )
-
+                # Calculate error percentages
                 pct = (np.abs(ts_preds - y_test) / y_test) * 100
                 err_accum.append(np.mean(pct))
                 acc10_accum.append(np.mean(pct <= 10) * 100)
@@ -267,5 +280,5 @@ if __name__ == "__main__":
     app.extract_features()
     app.run_experiments()
     print(
-        f"\n[COMPLETED] Outputs closest to the paper results (Table I: ~10.05% Error) are ready in the '{OUTPUT_DIR}' folder."
+        f"\n[COMPLETED] Results and figures are saved in the '{OUTPUT_DIR}' directory."
     )
