@@ -195,7 +195,7 @@ class PeopleCounterPaperReproduction:
         formatter.set_powerlimits((4, 4))
 
         if name == "Method 3":
-            # Fig 11 special: Two-panel plot arranged in ascending order
+            # For fig 11 two-panel plot arranged in ascending order
             fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
             s1 = np.argsort(X[:, 0])
             s2 = np.argsort(X[:, 1])
