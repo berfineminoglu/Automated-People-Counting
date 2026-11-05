@@ -14,8 +14,8 @@ import shutil
 warnings.filterwarnings("ignore")
 
 # file paths
-IMAGE_FOLDER = r"C:\Users\emino\Desktop\İYTE\2025-2026\TERM-1\CENG391\ASSIGNMENTS\ASSIGNMENT-5\Automated-People-Counting\VideoDataset\ximagepixels"
-GT_FILE = r"C:\Users\emino\Desktop\İYTE\2025-2026\TERM-1\CENG391\ASSIGNMENTS\ASSIGNMENT-5\Automated-People-Counting\VideoDataset\groundtruth.txt"
+IMAGE_FOLDER = os.path.join("VideoDataset", "ximagepixels")
+GT_FILE = os.path.join("VideoDataset", "groundtruth.txt")
 OUTPUT_DIR = "Final_Output"
 
 
